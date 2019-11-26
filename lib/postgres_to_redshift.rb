@@ -20,9 +20,9 @@ class PostgresToRedshift
   CURRENT_TIMESTAMP = Time.now.strftime("%Y-%m-%d-%H-%M-%S")
 
   def self.update_tables
-    bucket.objects.with_prefix("export").delete_all
-
     update_tables = PostgresToRedshift.new
+
+    update_tables.bucket.objects.with_prefix("export").delete_all
 
     update_tables.tables.each do |table|
       target_connection.exec("CREATE TABLE IF NOT EXISTS #{schema}.#{target_connection.quote_ident(table.target_table_name)} (#{table.columns_for_create})")
