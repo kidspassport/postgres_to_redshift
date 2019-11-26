@@ -17,10 +17,12 @@ class PostgresToRedshift
   KILOBYTE = 1024
   MEGABYTE = KILOBYTE * 1024
   GIGABYTE = MEGABYTE * 1024
-  SLEEP_IN_SECONDS = 10
+  CURRENT_TIMESTAMP = Time.now.strftime("%Y-%m-%d-%H-%M-%S")
 
   def self.update_tables
     update_tables = PostgresToRedshift.new
+
+    update_tables.bucket.objects.with_prefix("export").delete_all
 
     update_tables.tables.each do |table|
       target_connection.exec("CREATE TABLE IF NOT EXISTS #{schema}.#{target_connection.quote_ident(table.target_table_name)} (#{table.columns_for_create})")
@@ -95,7 +97,8 @@ class PostgresToRedshift
     zip = Zlib::GzipWriter.new(tmpfile)
     chunksize = 5 * GIGABYTE # uncompressed
     chunk = 1
-    bucket.objects.with_prefix("export/#{table.target_table_name}.psv.gz").delete_all
+    # instead of deleting each individual table file, we delete everything with the prefix 'export'
+    # bucket.objects.with_prefix("export/#{table.target_table_name}.psv.gz").delete_all
     begin
       puts "Downloading #{table}"
       $stdout.flush   # flush output for immediate logging
@@ -131,7 +134,7 @@ class PostgresToRedshift
     puts "Uploading #{table.target_table_name}.#{chunk}"
     $stdout.flush   # flush output for immediate logging
 
-    bucket.objects["export/#{table.target_table_name}.psv.gz.#{chunk}"].write(buffer, acl: :private)
+    bucket.objects["export/#{CURRENT_TIMESTAMP}/#{table.target_table_name}.psv.gz.#{chunk}"].write(buffer, acl: :private)
   end
 
   def import_table(table)
@@ -148,13 +151,7 @@ class PostgresToRedshift
 
     target_connection.exec("CREATE TABLE #{schema}.#{target_connection.quote_ident(table.target_table_name)} (#{table.columns_for_create})")
 
-    begin
-      target_connection.exec("COPY #{schema}.#{target_connection.quote_ident(table.target_table_name)} FROM 's3://#{ENV['S3_DATABASE_EXPORT_BUCKET']}/export/#{table.target_table_name}.psv.gz' CREDENTIALS 'aws_access_key_id=#{ENV['S3_DATABASE_EXPORT_ID']};aws_secret_access_key=#{ENV['S3_DATABASE_EXPORT_KEY']}' GZIP TRUNCATECOLUMNS ESCAPE DELIMITER as '|';")
-    rescue
-      puts "COPY failed. Pausing for #{SLEEP_IN_SECONDS} seconds."
-      sleep SLEEP_IN_SECONDS
-      target_connection.exec("COPY #{schema}.#{target_connection.quote_ident(table.target_table_name)} FROM 's3://#{ENV['S3_DATABASE_EXPORT_BUCKET']}/export/#{table.target_table_name}.psv.gz' CREDENTIALS 'aws_access_key_id=#{ENV['S3_DATABASE_EXPORT_ID']};aws_secret_access_key=#{ENV['S3_DATABASE_EXPORT_KEY']}' GZIP TRUNCATECOLUMNS ESCAPE DELIMITER as '|';")
-    end
+    target_connection.exec("COPY #{schema}.#{target_connection.quote_ident(table.target_table_name)} FROM 's3://#{ENV['S3_DATABASE_EXPORT_BUCKET']}/export/#{CURRENT_TIMESTAMP}/#{table.target_table_name}.psv.gz' CREDENTIALS 'aws_access_key_id=#{ENV['S3_DATABASE_EXPORT_ID']};aws_secret_access_key=#{ENV['S3_DATABASE_EXPORT_KEY']}' GZIP TRUNCATECOLUMNS ESCAPE DELIMITER as '|';")
 
     target_connection.exec("DROP TABLE IF EXISTS #{schema}.#{table.target_table_name}_updating CASCADE")
 
